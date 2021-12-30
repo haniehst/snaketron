@@ -4,7 +4,7 @@ from os import path
 
 env.user = 'ubuntu'
 env.hosts = 'ijust.ir'
-env.key_filename = '~/aminhp.pem'
+env.key_filename = '~/hanie.pem'
 home = '/var/www/ie/'
 p2p = path.join(home, 'p2p_videochat/')
 game = path.join(home, 'webSocket/')
