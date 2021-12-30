@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<!--suppress ALL -->
+<html>
+<head>
+  <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/1.3.6/socket.io.min.js"></script>
+	 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  <title>Tron</title>
+</head>
+<body>
+<div class="container">
+
+	<div class="row" style="margin-top: 20px">
+
+		<div class="col-lg-1">
+			<label style="margin-top: 7px" for="roomId">Room:</label>
+		</div>
+		<div class="col-lg-7">
+			<input style="margin-top: 3px;" type="text" class="col-lg-12" id="roomId">
+
+		</div>
+		<div class="col-lg-2">
+			<button style="margin-left: 5px;"  class="btn btn-primary col-lg-12" type="button" id = "CrBtn" name="Create" onclick="create_game()"> Create  </button>
+
+		</div>
+		<div class="col-lg-2">
+			<button class="btn btn-warning col-lg-12" type="button" id = "JnBtn" name="Join" onclick="join_game()"> Join </button>
+
+		</div>
+	<br>
+	</div>
+
+	<div class="row" style="margin-top: 35px">
+		<p id="status"> status: </p>
+	</div>
+
+	<div class="row" style="margin-top: 35px">
+		<canvas class="center col-lg-6" id="game-canvas" width="500" height="500" style="border:1px solid #000000;"> </canvas>
+	<!--</div>-->
+	<!--<div class="container">-->
+
+		<img class="center col-lg-6" style="margin-top: 20px" src="statics/tron.png" id="replayTag" width="500" height="500">
+		<br>
+	</div>
+	<div class="row" style="margin-top: 40px; margin-bottom: 50px">
+		<div class="col-lg-1">
+			<label style="margin-top: 75px; margin-left: 6px" for="localVideo">Local:</label>
+		</div>
+
+		<div class="col-lg-4">
+			<video id="localVideo" autoplay muted style="width:100%;border:1px solid #000000;"></video>
+		</div>
+
+		<div class="col-lg-2">
+		</div>
+
+		<div class="col-lg-1">
+			<label style="margin-top: 70px; margin-left: 6px" for="remoteVideo">Remote:</label>
+
+		</div>
+		<div class="col-lg-4">
+			<video id="remoteVideo" autoplay style="width:100%;border:1px solid #000000;"></video>
+		</div>
+	</div>
+</div>
+<script type="text/javascript">
+
+
+	const url = 'https://' + document.domain + ':' + location.port + "/game";
+	const uuid = Uuid();
+	var room = 'default';
+
+	const DIR_RIGHT = 0;
+	const DIR_UP = 1;
+	const DIR_LEFT = 2;
+	const DIR_DOWN = 3;
+
+	const DOWN_KEY = 40;
+	const RIGHT_KEY = 39;
+	const UP_KEY = 38;
+	const LEFT_KEY = 37;
+	const SPACE_KEY = 32;
+	const ENTER_KEY = 13;
+	const ESC_KEY = 27;
+	const R_KEY = 82;
+	const P_KEY = 80;
+	const D_KEY = 68;
+
+	const canvas = document.getElementById("game-canvas").getContext("2d");
+	const width = document.getElementById("game-canvas").width;
+	const height = document.getElementById("game-canvas").height;
+	const canvasElement = document.getElementById("game-canvas");
+	const replayTag = document.getElementById("replayTag");
+
+	var points;
+	var markedPoints;
+	var myPoint;
+	var enemyPoint;
+	var running;
+	var downloaded;
+	var winnerPoint;
+	var loserPoint;
+	const cycleDuration = 10;
+	var replay;
+
+
+	var localVideo;
+	var remoteVideo;
+	var peerConnection;
+	var isCaller;
+	var index = 0;
+
+	init();
+
+	function create_game()
+	{
+		room = document.getElementById("roomId").value;
+		isCaller = false;
+		Connect();
+		startChat();
+		document.getElementById("status").innerHTML = " status: Ready";
+		console.log('create');
+	}
+
+	function join_game() {
+		room = document.getElementById("roomId").value;
+		isCaller = true;
+		Connect();
+		startChat();
+		document.getElementById("status").innerHTML = " status: Ready";
+		console.log('join');
+	}
+
+	function init()
+	{
+		var txt1 = "Choose an id and press create to create a new room \n";
+		var txt2 = "Press Join to Join an existing room by it's id! \n";
+		var txt3 ="Press P To Start Game \n";
+		var txt4 = "Press D To Download And Replay Your Game \n";
+		var txt5 = "Press R To Reset Your Game \n";
+
+		canvas.clearRect(0, 0, width, height);
+		canvas.font = "18px Comic Sans MS";
+		canvas.fillStyle = 'red';
+		canvas.textAlign = "center";
+		canvas.fillText(txt1, width/2, height/4);
+		canvas.fillText(txt2, width/2, height/3);
+		canvas.fillText(txt3, width/2, height/2.35);
+		canvas.fillText(txt4, width/2, height/1.95);
+		canvas.fillText(txt5, width/2, height/1.7);
+	}
+
+
+	function resetGui()
+	{
+		canvas.fillStyle = 'white';
+		canvas.clearRect(0, 0, width, height);
+	}
+
+	function draw()
+	{
+		for (i in points)
+		{
+			point = points[i];
+			canvas.fillStyle = point.color;
+			canvas.fillRect(point.x, point.y, 1, 1);
+		}
+	}
+
+	function createPoint(x, y, dir, color, name)
+	{
+		return {
+			x: x,
+			y: y,
+			dir: dir,
+			color: color,
+			name: name
+		};
+	}
+
+	function point2position1d(point)
+	{
+		return point.y * width + point.x;
+	}
+
+	function reset(point_count)
+	{
+		replay = []
+		points = [];
+		for (i = 0; i < point_count; i++)
+		{
+			if (i == 0)
+				points.push(createPoint(50, 250, DIR_RIGHT, 'blue', 'point_' + i));
+			else
+				points.push(createPoint(450, 250, DIR_LEFT, 'red', 'point_' + i));
+		}
+		markedPoints = [];
+		running = false;
+		winnerPoint = null;
+		loserPoint = null;
+		resetGui();
+		draw();
+	}
+
+	function updatePoint(point)
+	{
+		dir = point.dir;
+		if (dir == DIR_RIGHT)
+			point.x += 1;
+		else if (dir == DIR_UP)
+			point.y -= 1;
+		else if (dir == DIR_LEFT)
+			point.x -= 1;
+		else if (dir == DIR_DOWN)
+			point.y += 1;
+	}
+
+	function markPoint(point)
+	{
+		markedPoints.push(point2position1d(point));
+	}
+
+	function checkLoss(point)
+	{
+		if (point.x < 0 || point.x >= width ||
+			point.y < 0 || point.y >= height ||
+			markedPoints.find(function(elm) { return elm == point2position1d(point); }))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	function startGame(point_count)
+	{
+		reset(point_count);
+		running = true;
+		loop();
+	}
+
+	function loop()
+	{
+		for (i in points)
+			updatePoint(points[i]);
+
+        for (i in points)
+            if (checkLoss(points[i]))
+            {
+                loserPoint = points[i];
+				winnerPoint = points[1-i];
+//                if (i == 0)
+//                    winnerPoint = points[1];
+//                else
+//                    winnerPoint = points[0];
+                break;
+            }
+
+		for (i in points)
+			markPoint(points[i]);
+
+		draw();
+
+        if (winnerPoint)
+        {
+            running = false;
+
+			var txt = "winner: " + winnerPoint.name;
+			canvas.clearRect(0, 0, width, height);
+			canvas.font = "65px Comic Sans MS";
+			canvas.fillStyle = winnerPoint.color;
+			canvas.textAlign = "center";
+			canvas.fillText(txt, width/2, height/2);
+			replay.push(takeSnapshot());
+			sendReplay();
+		}
+
+
+			
+		if (running)
+		{
+			replay.push(takeSnapshot());
+			setTimeout(loop, cycleDuration);
+		}
+
+	}
+
+	function takeSnapshot()
+	{
+		return canvasElement.toDataURL('image/png', 0.1)
+	}
+
+	function sendReplay()
+	{
+		if (winnerPoint == points[myPoint])
+		{
+			sendBySocket('upload', {'replay': replay, 'name1': points[myPoint].name, 'name2': points[enemyPoint].name});
+			document.getElementById("status").innerHTML = " status: Uploading";
+		}
+	}
+
+	function showReplay() {
+		if (index < downloaded.length)
+		{
+			replayTag.src = downloaded[index];
+			index++;
+			setTimeout(showReplay, cycleDuration);
+		}
+		else {
+			replayTag.src = downloaded[downloaded.length-1];
+			index = 0;
+		}
+
+	}
+
+	function Uuid() {
+		function s4() {
+			return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
+		}
+		return s4() + s4() + '-' + s4() + '-' + s4() + '-' + s4() + '-' + s4() + s4() + s4();
+	}
+
+
+	function Connect()
+	{
+		socket = io.connect(url);
+	  		sendBySocket('join', {});
+
+		socket.on("command", function(json){
+			// var json = JSON.parse(data);
+			if(json.uuid == uuid.toString())
+				return;
+			points[enemyPoint].dir = json.dir;
+		})
+
+		socket.on("clear", function(json){
+			reset(2);
+			document.getElementById("status").innerHTML = " status: Ready";
+			console.log('stoped');
+			init();
+			replayTag.src = "statics/tron.png";
+		})
+
+		socket.on("download_completed", function(json){
+			document.getElementById("status").innerHTML = " status: Download_Completed";
+			downloaded = json.data;
+			showReplay();
+		})
+
+		socket.on("upload_completed", function(json){
+			document.getElementById("status").innerHTML = " status: Upload_Completed";
+			})
+
+		socket.on("start", function(json){
+			console.log(json.data);
+			for (i in json.data)
+			{
+				console.log(json.data[i].uuid, uuid);
+				document.getElementById("status").innerHTML = " status: Playing";				
+				if(json.data[i].uuid == uuid.toString())
+				{
+					myPoint = json.data[i].point;
+					enemyPoint = (myPoint == 1) ? 0 : 1;
+					startGame(2);
+				}
+			}
+		})
+
+		socket.on('sdp', function(json){
+			if(json.uuid == uuid.toString())
+				return;
+
+			peerConnection.setRemoteDescription(new RTCSessionDescription(json.sdp)).then(function() {
+				peerConnection.createAnswer().then(createdDescription).catch(errorHandler);
+			}).catch(errorHandler);
+		})
+
+		socket.on('ice', function(json){
+			if(json.uuid == uuid.toString())
+				return;
+			peerConnection.addIceCandidate(new RTCIceCandidate(json.ice)).catch(errorHandler);
+		})
+
+	}
+
+	function sendBySocket(perfix, data){
+		data.uuid = uuid;
+		data.room = room;
+		socket.emit(perfix, data);
+	}
+
+	function sendCommand(Command){
+		sendBySocket('command', {'dir': Command})
+	}
+
+	function sendICE(ICE){
+		sendBySocket('ice', {'ice': ICE});
+	}
+
+	function sendSDP(SDP){
+		sendBySocket('sdp', {'sdp': SDP});
+	}
+
+	document.addEventListener("keydown", keyPress, false);
+
+	function keyPress(e) {
+	  var keyCode = e.keyCode;
+	  if(keyCode==UP_KEY)
+	  	{
+	  		points[myPoint].dir = DIR_UP;
+	  		sendCommand(DIR_UP);
+	  	}
+
+	  else if(keyCode==DOWN_KEY)
+	  	{
+	  		points[myPoint].dir = DIR_DOWN;
+	  		sendCommand(DIR_DOWN);
+	  	}
+
+	  else if(keyCode==LEFT_KEY)
+	  	{
+	  		points[myPoint].dir = DIR_LEFT;
+	  		sendCommand(DIR_LEFT);
+	  	}
+
+	  else if(keyCode==RIGHT_KEY)
+	  	{
+	  		points[myPoint].dir = DIR_RIGHT;
+	  		sendCommand(DIR_RIGHT);
+	  	}
+	  // else if(keyCode==SPACE_KEY)
+
+	  else if(keyCode==P_KEY)
+	    {
+	  		sendBySocket('ready', {});
+	  		console.log("ready")
+	  	}
+
+	  else if(keyCode==D_KEY)
+	    {
+	  		sendBySocket('download', {'name1':winnerPoint.name, 'name2':loserPoint.name});
+	  		document.getElementById("status").innerHTML = " status: Downloading";
+	  	}
+
+	  else if(keyCode==R_KEY)
+	  	{
+			sendBySocket('stop', {});
+			console.log("stoping")
+		}
+	  }
+
+
+	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	var peerConnectionConfig = {
+		'iceServers': [
+			{'urls': 'stun:stun.services.mozilla.com'},
+			{'urls': 'stun:stun.l.google.com:19302'},
+			{
+				'urls': 'turn:turn.salar.click:3478?transport=udp',
+				'credential': 'KoalaTeam',
+				'username': 'salar'
+			}
+		]
+	};
+
+	var constraints = {
+		video:true,
+		audio:true
+	};
+
+	function startChat() {
+		localVideo = document.getElementById('localVideo');
+		remoteVideo = document.getElementById('remoteVideo');
+
+		peerConnection = new RTCPeerConnection(peerConnectionConfig);
+		peerConnection.onaddstream = gotRemoteStream;
+		peerConnection.onicecandidate = gotIceCandidate;
+		peerConnection.ontrack = gotRemoteStream;
+
+		if(navigator.mediaDevices.getUserMedia) {
+			navigator.mediaDevices.getUserMedia(constraints).then(getUserMediaSuccess).catch(errorHandler);
+		}
+		else {
+			alert('Your browser does not support getUserMedia API');
+		}
+	}
+
+	function getUserMediaSuccess(stream) {
+		console.log("getUserMediaSuccess");
+		localStream = stream;
+		localVideo.src = window.URL.createObjectURL(stream);
+		peerConnection.addStream(localStream);
+
+
+		if(isCaller){
+			peerConnection.createOffer().then(createdDescription).catch(errorHandler);
+		}
+	}
+
+
+	function gotIceCandidate(event) {
+		if(event.candidate != null)
+			//sendbySocket(JSON.stringify({'ice': event.candidate, 'uuid': uuid, "room":"{{name}}"}), "ice");
+			sendICE(event.candidate);
+	}
+
+
+	function gotRemoteStream(event) {
+		console.log('gotRemoteStreamSuccess');
+		remoteVideo.src = window.URL.createObjectURL(event.stream);
+	}
+
+
+	function createdDescription(description) {
+		peerConnection.setLocalDescription(description).then(function() {
+			//sendbySocket(JSON.stringify({'sdp': peerConnection.localDescription, 'uuid': uuid, "room":"{{name}}"}), 'sdp');
+			sendSDP(peerConnection.localDescription);
+		}).catch(errorHandler);
+	}
+
+
+	function errorHandler(error) {
+		console.log(error);
+	}
+
+</script>
+
+</body>
+</html>
